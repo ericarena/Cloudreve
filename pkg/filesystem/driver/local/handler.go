@@ -282,39 +282,24 @@ func (handler Driver) CancelToken(ctx context.Context, uploadSession *serializer
 }
 
 // 重命名文件
-func (handler Driver) Rename(ctx context.Context, src, dst string) error {
+func RenamePhysical(src, dst string) error {
+	if !util.Exists(src) {
+		return errors.New("源文件不存在")
+	}
+
+	basePath := filepath.Dir(dst)
+	if !util.Exists(basePath) {
+		err := os.MkdirAll(basePath, 0700)
+		if err != nil {
+			util.Log().Warning("无法创建目录，%s", err)
+			return err
+		}
+	}
+
 	err := os.Rename(src, dst)
 	if err != nil {
 		util.Log().Warning("无法重命名文件，%s", err)
 		return err
 	}
 	return nil
-}
-
-// 复制文件
-func (handler Driver) Copy(ctx context.Context, src, dst string) (int64, error) {
-	sourceFileStat, err := os.Stat(src)
-	if err != nil {
-		return 0, err
-	}
-
-	if !sourceFileStat.Mode().IsRegular() {
-		util.Log().Warning("不是常规文件，%s", err)
-		return 0, err
-	}
-
-	source, err := os.Open(src)
-	if err != nil {
-		return 0, err
-	}
-	defer source.Close()
-
-	destination, err := os.Create(dst)
-	if err != nil {
-		return 0, err
-	}
-	defer destination.Close()
-
-	nBytes, err := io.Copy(destination, source)
-	return nBytes, err
 }

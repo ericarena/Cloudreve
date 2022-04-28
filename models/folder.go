@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/cloudreve/Cloudreve/v3/pkg/util"
@@ -299,6 +300,28 @@ func (folder *Folder) MoveFolderTo(dirs []uint, dstFolder *Folder) error {
 // Rename 重命名目录
 func (folder *Folder) Rename(new string) error {
 	return DB.Model(&folder).UpdateColumn("name", new).Error
+}
+
+// UpdateSourceNameBatch 批量更新SourceName
+func UpdateSourceNameBatch(policyId uint, origin, new string) error {
+	// 软链接等文件sourcename也要更新？
+	var filesToUpdate []File
+	DB.Model(&File{}).Where(
+		"policy_id = ? and source_name like ?",
+		policyId, origin+"%",
+	).Find(&filesToUpdate)
+
+	if len(filesToUpdate) > 0 {
+		for _, value := range filesToUpdate {
+			if err := DB.Model(&value).Update(
+				"source_name",
+				strings.Replace(value.SourceName, origin, new, 1),
+			).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 /*

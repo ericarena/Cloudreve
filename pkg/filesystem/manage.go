@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	model "github.com/cloudreve/Cloudreve/v3/models"
+	"github.com/cloudreve/Cloudreve/v3/pkg/filesystem/driver/local"
 	"github.com/cloudreve/Cloudreve/v3/pkg/filesystem/fsctx"
 	"github.com/cloudreve/Cloudreve/v3/pkg/hashid"
 	"github.com/cloudreve/Cloudreve/v3/pkg/serializer"
@@ -32,6 +33,12 @@ func (fs *FileSystem) Rename(ctx context.Context, dir, file []uint, new string) 
 			return ErrPathNotExist
 		}
 
+		// 处理物理文件重命名
+		err = fs.renameFileOrFolderPhysical(fileObject, nil, new)
+		if err != nil {
+			return ErrFileExisted
+		}
+
 		err = fileObject[0].Rename(new)
 		if err != nil {
 			return ErrFileExisted
@@ -45,6 +52,12 @@ func (fs *FileSystem) Rename(ctx context.Context, dir, file []uint, new string) 
 			return ErrPathNotExist
 		}
 
+		// 处理物理目录重命名
+		err = fs.renameFileOrFolderPhysical(nil, folderObject, new)
+		if err != nil {
+			return ErrFileExisted
+		}
+
 		err = folderObject[0].Rename(new)
 		if err != nil {
 			return ErrFileExisted
@@ -53,6 +66,58 @@ func (fs *FileSystem) Rename(ctx context.Context, dir, file []uint, new string) 
 	}
 
 	return ErrPathNotExist
+}
+
+func (fs *FileSystem) renameFileOrFolderPhysical(file []model.File, folder []model.Folder, new string) error {
+	// local存储策略下，关闭自动重命名，执行物理文件的重命名
+	if !(fs.Policy.Type == "local" && !fs.Policy.AutoRename) {
+		// 不处理
+		return nil
+	}
+	fs.DispatchHandler()
+
+	if len(file) > 0 {
+		newSourceName := path.Join(path.Dir(file[0].SourceName), new)
+
+		if err := fs.renameAndSourceName(file[0].SourceName, newSourceName); err != nil {
+			return err
+		}
+	}
+
+	if len(folder) > 0 {
+		if folder[0].TraceRoot() != nil {
+			return ErrPathNotExist
+		}
+
+		oldName := folder[0].Name
+		// 路径规则中不能有随机规则
+		// TODO 检查规则中是否有随机
+		oldPath := fs.Policy.GeneratePath(
+			fs.User.Model.ID,
+			path.Join(folder[0].Position, oldName),
+		)
+		newPath := fs.Policy.GeneratePath(
+			fs.User.Model.ID,
+			path.Join(folder[0].Position, new),
+		)
+
+		if err := fs.renameAndSourceName(oldPath, newPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (fs *FileSystem) renameAndSourceName(oldPath, newPath string) error {
+	if err := local.RenamePhysical(oldPath, newPath); err != nil {
+		return err
+	}
+
+	// 软链接等文件sourcename也要更新？
+	if err := model.UpdateSourceNameBatch(fs.Policy.ID, oldPath, newPath); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Copy 复制src目录下的文件或目录到dst，
@@ -93,6 +158,68 @@ func (fs *FileSystem) Copy(ctx context.Context, dirs, files []uint, src, dst str
 	return nil
 }
 
+func (fs *FileSystem) moveFileOrFolderPhysical(files, folders []uint, dstFolder model.Folder) error {
+	// local存储策略下，关闭自动重命名，执行物理文件的重命名
+	if !(fs.Policy.Type == "local" && !fs.Policy.AutoRename) {
+		// 不处理
+		return nil
+	}
+	fs.DispatchHandler()
+
+	if dstFolder.TraceRoot() != nil {
+		return ErrPathNotExist
+	}
+
+	// 路径规则中不能有随机规则
+	// TODO 检查规则中是否有随机
+	dstPath := fs.Policy.GeneratePath(fs.User.Model.ID, dstFolder.Position)
+	dstPath = path.Join(dstPath, dstFolder.Name)
+
+	if len(files) > 0 {
+		if filesModel, err := model.GetFilesByIDs(files, fs.User.ID); err == nil {
+			for _, f := range filesModel {
+				oldSourceName := f.SourceName
+				newSourceName := path.Join(dstPath, f.Name)
+				err := local.RenamePhysical(oldSourceName, newSourceName)
+				if err != nil {
+					return err
+				}
+
+				err = model.UpdateSourceNameBatch(fs.Policy.ID, oldSourceName, newSourceName)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	if len(folders) > 0 {
+		if foldersModel, err := model.GetFoldersByIDs(folders, fs.User.ID); err == nil {
+			for _, f := range foldersModel {
+				if f.TraceRoot() != nil {
+					return ErrPathNotExist
+				}
+
+				// 路径规则中不能有随机规则
+				// TODO 检查规则中是否有随机
+				oldSourceName := fs.Policy.GeneratePath(fs.User.Model.ID, f.Position)
+				oldSourceName = path.Join(oldSourceName, f.Name)
+				newSourceName := path.Join(dstPath, f.Name)
+				err = local.RenamePhysical(oldSourceName, newSourceName)
+				if err != nil {
+					return err
+				}
+
+				err = model.UpdateSourceNameBatch(fs.Policy.ID, oldSourceName, newSourceName)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // Move 移动文件和目录, 将id列表dirs和files从src移动至dst
 func (fs *FileSystem) Move(ctx context.Context, dirs, files []uint, src, dst string) error {
 	// 获取目的目录
@@ -101,6 +228,11 @@ func (fs *FileSystem) Move(ctx context.Context, dirs, files []uint, src, dst str
 	// 不存在时返回空的结果
 	if !isDstExist || !isSrcExist {
 		return ErrPathNotExist
+	}
+
+	// 移动物理文件
+	if err := fs.moveFileOrFolderPhysical(files, dirs, *dstFolder); err != nil {
+		util.Log().Warning("移动物理文件错误 %s", err)
 	}
 
 	// 处理目录及子文件移动
@@ -114,9 +246,6 @@ func (fs *FileSystem) Move(ctx context.Context, dirs, files []uint, src, dst str
 	if err != nil {
 		return serializer.NewError(serializer.CodeDBError, "操作失败，可能有重名冲突", err)
 	}
-
-	// 移动文件
-
 	return err
 }
 
