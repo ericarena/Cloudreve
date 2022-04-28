@@ -3,10 +3,11 @@ package filesystem
 import (
 	"context"
 	"errors"
-	"github.com/cloudreve/Cloudreve/v3/pkg/filesystem/response"
-	testMock "github.com/stretchr/testify/mock"
 	"os"
 	"testing"
+
+	"github.com/cloudreve/Cloudreve/v3/pkg/filesystem/response"
+	testMock "github.com/stretchr/testify/mock"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	model "github.com/cloudreve/Cloudreve/v3/models"
@@ -224,12 +225,10 @@ func TestFileSystem_CreateDirectory(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(2, 1))
 
 	mock.ExpectQuery("SELECT(.+)files").WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
-	mock.ExpectBegin()
 	// ab
 	mock.ExpectQuery("SELECT(.+)").
 		WithArgs("ab", 2, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(3, 1))
-	mock.ExpectCommit()
 	res, err := fs.CreateDirectory(ctx, "/ad/ab")
 	asserts.NoError(err)
 	asserts.EqualValues(3, res.ID)
@@ -245,10 +244,10 @@ func TestFileSystem_CreateDirectory(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(2, 1))
 
 	mock.ExpectQuery("SELECT(.+)files").WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
-	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT(.+)").
 		WithArgs("ab", 2, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}))
+	mock.ExpectBegin()
 	mock.ExpectExec("INSERT(.+)").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	_, err = fs.CreateDirectory(ctx, "/ad/ab")
@@ -270,18 +269,18 @@ func TestFileSystem_CreateDirectory(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 1))
 	mock.ExpectQuery("SELECT(.+)files").WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 	// 创建ad
-	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT(.+)").
 		WithArgs("ad", 1, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}))
+	mock.ExpectBegin()
 	mock.ExpectExec("INSERT(.+)").WillReturnResult(sqlmock.NewResult(2, 1))
 	mock.ExpectCommit()
 	mock.ExpectQuery("SELECT(.+)files").WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 	// 创建ab
-	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT(.+)").
 		WithArgs("ab", 2, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}))
+	mock.ExpectBegin()
 	mock.ExpectExec("INSERT(.+)").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	_, err = fs.CreateDirectory(ctx, "/ad/ab")
@@ -303,12 +302,14 @@ func TestFileSystem_CreateDirectory(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 1))
 	mock.ExpectQuery("SELECT(.+)files").WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 	// 创建ad
-	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT(.+)").
 		WithArgs("ad", 1, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}))
+	mock.ExpectBegin()
 	mock.ExpectExec("INSERT(.+)").WillReturnResult(sqlmock.NewResult(2, 1)).WillReturnError(errors.New("error"))
 	mock.ExpectRollback()
+	mock.ExpectQuery("SELECT(.+)").
+		WillReturnError(errors.New("error"))
 	_, err = fs.CreateDirectory(ctx, "/ad/ab")
 	asserts.Error(err)
 	asserts.NoError(mock.ExpectationsWereMet())
@@ -317,6 +318,12 @@ func TestFileSystem_CreateDirectory(t *testing.T) {
 	mock.ExpectQuery("SELECT(.+)").
 		WithArgs(1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 1))
+	_, err = fs.CreateDirectory(ctx, "/")
+	asserts.NoError(err)
+	asserts.NoError(mock.ExpectationsWereMet())
+
+	// 直接创建根目录, 重设根目录
+	fs.Root = &model.Folder{}
 	_, err = fs.CreateDirectory(ctx, "/")
 	asserts.NoError(err)
 	asserts.NoError(mock.ExpectationsWereMet())
@@ -670,8 +677,8 @@ func TestFileSystem_Rename(t *testing.T) {
 			WithArgs(10, 1).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(10, "old.text"))
 		mock.ExpectBegin()
-		mock.ExpectExec("UPDATE(.+)files(.+)").
-			WithArgs("new.txt", sqlmock.AnyArg(), 10).
+		mock.ExpectExec("UPDATE(.+)files(.+)SET(.+)").
+			WithArgs("new.txt", 10).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 		err := fs.Rename(ctx, []uint{}, []uint{10}, "new.txt")
@@ -696,8 +703,8 @@ func TestFileSystem_Rename(t *testing.T) {
 			WithArgs(10, 1).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(10, "old.text"))
 		mock.ExpectBegin()
-		mock.ExpectExec("UPDATE(.+)files(.+)").
-			WithArgs("new.txt", sqlmock.AnyArg(), 10).
+		mock.ExpectExec("UPDATE(.+)files(.+)SET(.+)").
+			WithArgs("new.txt", 10).
 			WillReturnError(errors.New("error"))
 		mock.ExpectRollback()
 		err := fs.Rename(ctx, []uint{}, []uint{10}, "new.txt")
@@ -712,8 +719,8 @@ func TestFileSystem_Rename(t *testing.T) {
 			WithArgs(10, 1).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(10, "old"))
 		mock.ExpectBegin()
-		mock.ExpectExec("UPDATE(.+)folders(.+)").
-			WithArgs("new", sqlmock.AnyArg(), 10).
+		mock.ExpectExec("UPDATE(.+)folders(.+)SET(.+)").
+			WithArgs("new", 10).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 		err := fs.Rename(ctx, []uint{10}, []uint{}, "new")
@@ -738,8 +745,8 @@ func TestFileSystem_Rename(t *testing.T) {
 			WithArgs(10, 1).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(10, "old"))
 		mock.ExpectBegin()
-		mock.ExpectExec("UPDATE(.+)folders(.+)").
-			WithArgs("new", sqlmock.AnyArg(), 10).
+		mock.ExpectExec("UPDATE(.+)folders(.+)SET(.+)").
+			WithArgs("new", 10).
 			WillReturnError(errors.New("error"))
 		mock.ExpectRollback()
 		err := fs.Rename(ctx, []uint{10}, []uint{}, "new")
