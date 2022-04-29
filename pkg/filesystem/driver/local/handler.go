@@ -280,26 +280,3 @@ func (handler Driver) Token(ctx context.Context, ttl int64, uploadSession *seria
 func (handler Driver) CancelToken(ctx context.Context, uploadSession *serializer.UploadSession) error {
 	return nil
 }
-
-// 重命名文件
-func RenamePhysical(src, dst string) error {
-	if !util.Exists(src) {
-		return errors.New("源文件不存在")
-	}
-
-	basePath := filepath.Dir(dst)
-	if !util.Exists(basePath) {
-		err := os.MkdirAll(basePath, 0700)
-		if err != nil {
-			util.Log().Warning("无法创建目录，%s", err)
-			return err
-		}
-	}
-
-	err := os.Rename(src, dst)
-	if err != nil {
-		util.Log().Warning("无法重命名文件，%s", err)
-		return err
-	}
-	return nil
-}

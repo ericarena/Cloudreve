@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -43,4 +44,27 @@ func IsEmpty(name string) (bool, error) {
 		return true, nil
 	}
 	return false, err // Either not empty or error, suits both cases
+}
+
+// RenameOrMovePhysical 重命名移动文件
+func RenameOrMovePhysical(src, dst string) error {
+	if !Exists(src) {
+		return errors.New("源文件不存在")
+	}
+
+	basePath := filepath.Dir(dst)
+	if !Exists(basePath) {
+		err := os.MkdirAll(basePath, 0700)
+		if err != nil {
+			Log().Warning("无法创建目录，%s", err)
+			return err
+		}
+	}
+
+	err := os.Rename(src, dst)
+	if err != nil {
+		Log().Warning("无法重命名文件，%s", err)
+		return err
+	}
+	return nil
 }

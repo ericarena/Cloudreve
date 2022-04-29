@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	model "github.com/cloudreve/Cloudreve/v3/models"
-	"github.com/cloudreve/Cloudreve/v3/pkg/filesystem/driver/local"
 	"github.com/cloudreve/Cloudreve/v3/pkg/filesystem/fsctx"
 	"github.com/cloudreve/Cloudreve/v3/pkg/hashid"
 	"github.com/cloudreve/Cloudreve/v3/pkg/serializer"
@@ -109,7 +108,7 @@ func (fs *FileSystem) renameFileOrFolderPhysical(file []model.File, folder []mod
 }
 
 func (fs *FileSystem) renameAndSourceName(oldPath, newPath string) error {
-	if err := local.RenamePhysical(oldPath, newPath); err != nil {
+	if err := util.RenameOrMovePhysical(oldPath, newPath); err != nil {
 		return err
 	}
 
@@ -180,12 +179,8 @@ func (fs *FileSystem) moveFileOrFolderPhysical(files, folders []uint, dstFolder 
 			for _, f := range filesModel {
 				oldSourceName := f.SourceName
 				newSourceName := path.Join(dstPath, f.Name)
-				err := local.RenamePhysical(oldSourceName, newSourceName)
-				if err != nil {
-					return err
-				}
 
-				err = model.UpdateSourceNameBatch(fs.Policy.ID, oldSourceName, newSourceName)
+				err := fs.renameAndSourceName(oldSourceName, newSourceName)
 				if err != nil {
 					return err
 				}
@@ -200,17 +195,10 @@ func (fs *FileSystem) moveFileOrFolderPhysical(files, folders []uint, dstFolder 
 					return ErrPathNotExist
 				}
 
-				// 路径规则中不能有随机规则
-				// TODO 检查规则中是否有随机
 				oldSourceName := fs.Policy.GeneratePath(fs.User.Model.ID, f.Position)
 				oldSourceName = path.Join(oldSourceName, f.Name)
 				newSourceName := path.Join(dstPath, f.Name)
-				err = local.RenamePhysical(oldSourceName, newSourceName)
-				if err != nil {
-					return err
-				}
-
-				err = model.UpdateSourceNameBatch(fs.Policy.ID, oldSourceName, newSourceName)
+				err := fs.renameAndSourceName(oldSourceName, newSourceName)
 				if err != nil {
 					return err
 				}
